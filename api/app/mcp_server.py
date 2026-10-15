@@ -25,10 +25,17 @@ mcp = FastMCP(
 )
 
 
-def _client() -> httpx.Client:
-    return httpx.Client(
+# Tools are async on purpose. mcp 1.12 runs a sync tool directly on the event
+# loop, so one slow API call would stall every other call on the SSE session and
+# its keep-alive pings; the stdio bridge then drops the stream and the replies
+# are lost. Async tools keep the loop free, and the timeout bounds each call.
+TOOL_TIMEOUT = float(os.environ.get("KS_TOOL_TIMEOUT", "45"))
+
+
+def _client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
         base_url=API_URL,
-        timeout=httpx.Timeout(60.0, connect=10.0),
+        timeout=httpx.Timeout(TOOL_TIMEOUT, connect=10.0),
         headers={"Authorization": f"Bearer {API_KEY}"},
     )
 
@@ -38,7 +45,7 @@ def _dump(payload: object) -> str:
 
 
 @mcp.tool()
-def knowledge_search(
+async def knowledge_search(
     query: str,
     kind: str = "",
     tags: str = "",
@@ -65,23 +72,23 @@ def knowledge_search(
         body["agent"] = agent
     if session_id:
         body["session_id"] = session_id
-    with _client() as client:
-        resp = client.post("/v1/search", json=body)
+    async with _client() as client:
+        resp = await client.post("/v1/search", json=body)
         resp.raise_for_status()
         return _dump(resp.json())
 
 
 @mcp.tool()
-def knowledge_get(doc_id: str) -> str:
+async def knowledge_get(doc_id: str) -> str:
     """Read one of the user's stored documents, including every chunk, by doc_id from knowledge_search."""
-    with _client() as client:
-        resp = client.get(f"/v1/documents/{doc_id}")
+    async with _client() as client:
+        resp = await client.get(f"/v1/documents/{doc_id}")
         resp.raise_for_status()
         return _dump(resp.json())
 
 
 @mcp.tool()
-def knowledge_put(
+async def knowledge_put(
     body: str,
     title: str = "",
     kind: str = "knowledge",
@@ -107,35 +114,35 @@ def knowledge_put(
         "source_id": source_id or None,
         "created_at": created_at or None,
     }
-    with _client() as client:
-        resp = client.post("/v1/documents", json=payload)
+    async with _client() as client:
+        resp = await client.post("/v1/documents", json=payload)
         resp.raise_for_status()
         return _dump(resp.json())
 
 
 @mcp.tool()
-def knowledge_list(kind: str = "", tag: str = "", limit: int = 20) -> str:
+async def knowledge_list(kind: str = "", tag: str = "", limit: int = 20) -> str:
     """List the user's stored knowledge, history, or logs, newest first. Optional kind and tag filters."""
     params = {"limit": limit}
     if kind:
         params["kind"] = kind
     if tag:
         params["tag"] = tag
-    with _client() as client:
-        resp = client.get("/v1/documents", params=params)
+    async with _client() as client:
+        resp = await client.get("/v1/documents", params=params)
         resp.raise_for_status()
         return _dump(resp.json())
 
 
 @mcp.tool()
-def knowledge_tag(doc_id: str, add: str = "", remove: str = "") -> str:
+async def knowledge_tag(doc_id: str, add: str = "", remove: str = "") -> str:
     """Organize a document by adding or removing tags. Comma-separated."""
     payload = {
         "add": [t.strip() for t in add.split(",") if t.strip()],
         "remove": [t.strip() for t in remove.split(",") if t.strip()],
     }
-    with _client() as client:
-        resp = client.patch(f"/v1/documents/{doc_id}/tags", json=payload)
+    async with _client() as client:
+        resp = await client.patch(f"/v1/documents/{doc_id}/tags", json=payload)
         resp.raise_for_status()
         return _dump(resp.json())
 

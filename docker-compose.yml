@@ -47,7 +47,7 @@ services:
     depends_on:
       opensearch:
         condition: service_healthy
-    mem_limit: 320m
+    mem_limit: 640m
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:9470/health', timeout=5).read()\""]
