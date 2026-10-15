@@ -1,0 +1,60 @@
+name: knowledge-search
+
+services:
+  opensearch:
+    build: ./opensearch
+    image: knowledge-search-opensearch:3.9.0
+    environment:
+      - discovery.type=single-node
+      - cluster.name=knowledge-search
+      - node.name=ks-1
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true
+      # 512m heap. Direct memory capped because mmap is off (NIO buffers).
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m"
+      - bootstrap.memory_lock=false
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      # Local debug only. Agents must use the API, not raw OpenSearch.
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - osdata:/usr/share/opensearch/data
+    mem_limit: 1400m
+    memswap_limit: 1900m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 180s
+
+  api:
+    build: ./api
+    image: knowledge-search-api:0.1.0
+    env_file: .env
+    environment:
+      - OPENSEARCH_URL=http://opensearch:9200
+      - KS_INDEX=knowledge
+    ports:
+      - "0.0.0.0:9470:9470"
+      # MCP SSE for every Hermes on the LAN. Requires Bearer KS_API_KEY.
+      - "0.0.0.0:9471:9471"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    mem_limit: 320m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:9470/health', timeout=5).read()\""]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+
+volumes:
+  osdata:
